@@ -8,27 +8,33 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
 )
 
-var (
-	certFile = "/path/to/server.crt"
-	keyFile  = "/path/to/server.key"
-	caFile   = "/path/to/ca.crt"
+const (
+	CERT_FILE             = "/path/to/server.crt"
+	KEY_FILE              = "/path/to/server.key"
+	CA_FILE               = "/path/to/ca.crt"
+	ES_URL                = "http://localhost:9200"
+	INDEX_NAME            = "pfelk-*"
+	ES_USERNAME           = "elastic"
+	ES_PASSWORD_ENV       = "ES_PASSWORD"
+	LOOKBACK_TIME_MINUTES = 90
 )
 
 func main() {
 	// Load server certificate and key
-	serverCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	serverCert, err := tls.LoadX509KeyPair(CERT_FILE, KEY_FILE)
 	if err != nil {
 		log.Fatalf("unable to load server cert and key: %v", err)
 	}
 
 	// Load CA cert
-	caCert, err := ioutil.ReadFile(caFile)
+	caCert, err := ioutil.ReadFile(CA_FILE)
 	if err != nil {
 		log.Fatalf("unable to read CA cert: %v", err)
 	}
@@ -46,11 +52,9 @@ func main() {
 
 	// Set up Elasticsearch client
 	cfg := elasticsearch.Config{
-		Addresses: []string{
-			"http://localhost:9200", // replace with your Elasticsearch server address
-		},
-		Username: "user", // replace with your Elasticsearch username
-		Password: "pass", // replace with your Elasticsearch password
+		Addresses: []string{ES_URL},
+		Username:  ES_USERNAME,
+		Password:  os.Getenv(ES_PASSWORD_ENV), // retrieve password from environment variable
 	}
 	es, err := elasticsearch.NewClient(cfg)
 	if err != nil {
@@ -74,33 +78,33 @@ func main() {
 			// TODO: Check if interface is available
 
 			// Perform Elasticsearch query
-			query := `
-            {
-                "query": {
-                    "bool": {
-                        "must": [
-                            {
-                                "match": {
-                                    "suricata.interface": "%s"
-                                }
-                            },
-                            {
-                                "range": {
-                                    "@timestamp": {
-                                        "gte": "now-90m"
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                },
-                "size": 1
-            }
-        `
+			query := fmt.Sprintf(`
+				{
+					"query": {
+						"bool": {
+							"must": [
+								{
+									"match": {
+										"suricata.interface": "%s"
+									}
+								},
+								{
+									"range": {
+										"@timestamp": {
+											"gte": "now-%dm"
+										}
+									}
+								}
+							]
+						}
+					},
+					"size": 1
+				}
+			`, interfaceName, LOOKBACK_TIME_MINUTES)
 
 			res, err := es.Search(
 				es.Search.WithContext(context.Background()),
-				es.Search.WithIndex("pfelk-*"), // Replace with your desired index name
+				es.Search.WithIndex(INDEX_NAME),
 				es.Search.WithBody(strings.NewReader(query)),
 			)
 
