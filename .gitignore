@@ -152,8 +152,8 @@ cython_debug/
 #.idea/
 
 # Certs
-.key
-.ca
-.pub
-.crt
-.csr
+*.key
+*.ca
+*.pub
+*.crt
+*.csr
