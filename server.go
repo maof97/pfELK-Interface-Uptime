@@ -18,6 +18,7 @@ import (
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/sirupsen/logrus"
 	logrus_syslog "github.com/sirupsen/logrus/hooks/syslog"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -213,21 +214,47 @@ func main() {
 				return
 			}
 
-			// Print the data to stdout
-			fmt.Println(data)
-
-			/* if res.IsError() {
-				log.Printf("search request failed: %s", res.Status())
-				http.Error(w, "Error performing search", http.StatusInternalServerError)
+			// Get the hits
+			valid := gjson.Valid(string(body))
+			if !valid {
+				logger.WithFields(logrus.Fields{
+					"ip":    r.RemoteAddr,
+					"error": err,
+				}).Error("Error parsing response body")
+				http.Error(w, "Error parsing response body from ES", http.StatusInternalServerError)
 				return
 			}
 
+			hits := gjson.Get(string(body), "hits.total.value")
+			if !hits.Exists() {
+				logger.WithFields(logrus.Fields{
+					"ip":    r.RemoteAddr,
+					"error": err,
+				}).Error("Error parsing response body")
+				http.Error(w, "Error parsing response body from ES", http.StatusInternalServerError)
+				return
+			}
+			fmt.Println(hits)
+
 			// Check if we have hits
-			if res.TotalHits() > 0 {
+			if hits.Int() > 0 {
+				logger.WithFields(logrus.Fields{
+					"ip":        r.RemoteAddr,
+					"interface": interfaceName,
+				}).Info("Interface is up")
 				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("Interface is up"))
+				return
 			} else {
-				w.WriteHeader(http.StatusNotFound)
-			} */
+				logger.WithFields(logrus.Fields{
+					"ip":        r.RemoteAddr,
+					"interface": interfaceName,
+				}).Info("Interface is down")
+				w.WriteHeader(http.StatusNoContent)
+				w.Write([]byte("Interface is down"))
+				return
+			}
+
 		}),
 	}
 
