@@ -27,11 +27,11 @@ const (
 	KEY_FILE              = "certs/server.key"
 	CA_FILE               = "certs/ca.crt"
 	ES_URL                = "https://10.20.1.6:9200"
-	INDEX_NAME            = "pfelk-*"
+	INDEX_NAME            = "_all"
 	ES_USERNAME           = "zsoar"
 	ES_PASSWORD_ENV       = "ES_PASSWORD"
 	ES_IGNORE_CERT_ERRORS = true
-	LOOKBACK_TIME_MINUTES = 90
+	LOOKBACK_TIME_MINUTES = 10
 	LOG_SYSLOG_SERVER     = "10.20.1.1:514" // Leave empty to disable
 )
 
@@ -103,7 +103,7 @@ func main() {
 		Addr:         SERVER_URL,
 		TLSConfig:    tlsConfig,
 		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: 20 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Check if request is a GET request
 			if r.Method != http.MethodGet {
@@ -146,7 +146,7 @@ func main() {
 							"must": [
 								{
 									"match": {
-										"suricata.interface": "%s"
+										"suricata.eve.in_iface": "%s"
 									}
 								},
 								{
@@ -250,7 +250,7 @@ func main() {
 					"ip":        r.RemoteAddr,
 					"interface": interfaceName,
 				}).Info("Interface is down")
-				w.WriteHeader(http.StatusNoContent)
+				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("Interface is down"))
 				return
 			}
