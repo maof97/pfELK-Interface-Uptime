@@ -1,0 +1,13 @@
+{
+    "SERVER_URL": "localhost:8080",
+    "CERT_FILE": "certs/server.crt",
+    "KEY_FILE": "certs/server.key",
+    "CA_FILE": "certs/ca.crt",
+    "ES_URL": "https://10.20.1.6:9200",
+    "INDEX_NAME": "_all",
+    "ES_USERNAME": "zsoar",
+    "ES_PASSWORD_ENV": "ES_PASSWORD",
+    "ES_IGNORE_CERT_ERRORS": true,
+    "LOOKBACK_TIME_MINUTES": 10,
+    "LOG_SYSLOG_SERVER": "10.20.1.1:514"
+}

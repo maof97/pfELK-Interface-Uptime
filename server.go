@@ -21,29 +21,40 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const (
-	SERVER_URL            = "localhost:8080"
-	CERT_FILE             = "certs/server.crt"
-	KEY_FILE              = "certs/server.key"
-	CA_FILE               = "certs/ca.crt"
-	ES_URL                = "https://10.20.1.6:9200"
-	INDEX_NAME            = "_all"
-	ES_USERNAME           = "zsoar"
-	ES_PASSWORD_ENV       = "ES_PASSWORD"
-	ES_IGNORE_CERT_ERRORS = true
-	LOOKBACK_TIME_MINUTES = 10
-	LOG_SYSLOG_SERVER     = "10.20.1.1:514" // Leave empty to disable
-)
+type Config struct {
+	ServerURL           string `json:"SERVER_URL"`
+	CertFile            string `json:"CERT_FILE"`
+	KeyFile             string `json:"KEY_FILE"`
+	CaFile              string `json:"CA_FILE"`
+	EsUrl               string `json:"ES_URL"`
+	IndexName           string `json:"INDEX_NAME"`
+	EsUsername          string `json:"ES_USERNAME"`
+	EsPasswordEnv       string `json:"ES_PASSWORD_ENV"`
+	EsIgnoreCertErrors  bool   `json:"ES_IGNORE_CERT_ERRORS"`
+	LookbackTimeMinutes int    `json:"LOOKBACK_TIME_MINUTES"`
+	LogSyslogServer     string `json:"LOG_SYSLOG_SERVER"`
+}
 
 func main() {
+	file, _ := os.Open("config.json")
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	conf := Config{}
+	err := decoder.Decode(&conf)
+
+	if err != nil {
+		log.Fatalf("Error reading config file: %v", err)
+	}
+
 	// Load server certificate and key
-	serverCert, err := tls.LoadX509KeyPair(CERT_FILE, KEY_FILE)
+	serverCert, err := tls.LoadX509KeyPair(conf.CertFile, conf.KeyFile)
 	if err != nil {
 		log.Fatalf("unable to load server cert and key: %v", err)
 	}
 
 	// Load CA cert
-	caCert, err := ioutil.ReadFile(CA_FILE)
+	caCert, err := ioutil.ReadFile(conf.CaFile)
 	if err != nil {
 		log.Fatalf("unable to read CA cert: %v", err)
 	}
@@ -61,12 +72,12 @@ func main() {
 
 	// Set up Elasticsearch client
 	cfg := elasticsearch.Config{
-		Addresses: []string{ES_URL},
-		Username:  ES_USERNAME,
-		Password:  os.Getenv(ES_PASSWORD_ENV), // retrieve password from environment variable
+		Addresses: []string{conf.EsUrl},
+		Username:  conf.EsUsername,
+		Password:  os.Getenv(conf.EsPasswordEnv), // retrieve password from environment variable
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: ES_IGNORE_CERT_ERRORS,
+				InsecureSkipVerify: conf.EsIgnoreCertErrors,
 			},
 		},
 	}
@@ -87,20 +98,20 @@ func main() {
 	defer logFile.Close()
 
 	// Set up syslog writer if needed
-	if LOG_SYSLOG_SERVER != "" {
-		hook, err := logrus_syslog.NewSyslogHook("udp", LOG_SYSLOG_SERVER, syslog.LOG_INFO, "")
+	if conf.LogSyslogServer != "" {
+		hook, err := logrus_syslog.NewSyslogHook("udp", conf.LogSyslogServer, syslog.LOG_INFO, "")
 		if err != nil {
 			logger.Error("Unable to connect to local syslog daemon")
 		} else {
-			logger.AddHook(hook)
+			logrus.AddHook(hook)
 		}
 	}
-	mw := io.MultiWriter(os.Stdout, logFile)
+	mw := io.MultiWriter(os.Stdout, logFile, logger.Writer())
 	logrus.SetOutput(mw)
 
 	// Set up HTTP server
 	server := &http.Server{
-		Addr:         SERVER_URL,
+		Addr:         conf.ServerURL,
 		TLSConfig:    tlsConfig,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 20 * time.Second,
@@ -108,7 +119,7 @@ func main() {
 			// Check if request is a GET request
 			if r.Method != http.MethodGet {
 				http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":     r.RemoteAddr,
 					"method": r.Method,
 				}).Warning("Client requested invalid method")
@@ -118,7 +129,7 @@ func main() {
 			// Check if path is valid
 			if !strings.HasPrefix(r.URL.Path, "/interface_check/") {
 				http.Error(w, "Invalid request path", http.StatusNotFound)
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":   r.RemoteAddr,
 					"path": r.URL.Path,
 				}).Warning("Client requested invalid path")
@@ -130,7 +141,7 @@ func main() {
 			// Sanitize the input to prevent path traversal attacks
 			if strings.Contains(interfaceName, "/") {
 				http.Error(w, "Invalid interface name", http.StatusBadRequest)
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":        r.RemoteAddr,
 					"interface": interfaceName,
 				}).Warning("Client requested invalid interface name")
@@ -161,11 +172,11 @@ func main() {
 					},
 					"size": 1
 				}
-			`, interfaceName, LOOKBACK_TIME_MINUTES)
+			`, interfaceName, conf.LookbackTimeMinutes)
 
 			res, err := es.Search(
 				es.Search.WithContext(context.Background()),
-				es.Search.WithIndex(INDEX_NAME),
+				es.Search.WithIndex(conf.IndexName),
 				es.Search.WithBody(strings.NewReader(query)),
 			)
 
@@ -174,7 +185,7 @@ func main() {
 
 			if err != nil {
 				http.Error(w, "Error performing search", http.StatusInternalServerError)
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":    r.RemoteAddr,
 					"error": err,
 				}).Error("Error performing Eleasticsearch search")
@@ -183,7 +194,7 @@ func main() {
 
 			if res.IsError() {
 				// Log error message
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":              r.RemoteAddr,
 					"response_status": res.Status(),
 					"response_string": res.String(),
@@ -195,7 +206,7 @@ func main() {
 
 			body, err := ioutil.ReadAll(res.Body)
 			if err != nil {
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":    r.RemoteAddr,
 					"error": err,
 				}).Error("Error reading response body")
@@ -206,7 +217,7 @@ func main() {
 			var data map[string]interface{}
 			err = json.Unmarshal(body, &data)
 			if err != nil {
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":    r.RemoteAddr,
 					"error": err,
 				}).Error("Error unmarshalling response body")
@@ -217,7 +228,7 @@ func main() {
 			// Get the hits
 			valid := gjson.Valid(string(body))
 			if !valid {
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":    r.RemoteAddr,
 					"error": err,
 				}).Error("Error parsing response body")
@@ -227,7 +238,7 @@ func main() {
 
 			hits := gjson.Get(string(body), "hits.total.value")
 			if !hits.Exists() {
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":    r.RemoteAddr,
 					"error": err,
 				}).Error("Error parsing response body")
@@ -238,7 +249,7 @@ func main() {
 
 			// Check if we have hits
 			if hits.Int() > 0 {
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":        r.RemoteAddr,
 					"interface": interfaceName,
 				}).Info("Interface is up")
@@ -246,7 +257,7 @@ func main() {
 				w.Write([]byte("Interface is up"))
 				return
 			} else {
-				logger.WithFields(logrus.Fields{
+				logrus.WithFields(logrus.Fields{
 					"ip":        r.RemoteAddr,
 					"interface": interfaceName,
 				}).Info("Interface is down")
